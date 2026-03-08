@@ -1,4 +1,4 @@
-import { App, Editor, MarkdownFileInfo, MarkdownView, Modal, Notice, Setting, normalizePath } from "obsidian";
+import { App, Editor, MarkdownFileInfo, MarkdownView, Modal, Notice, Setting, htmlToMarkdown, normalizePath } from "obsidian";
 import type { PolyglotSettings } from "settings";
 
 export function handlePaste(
@@ -23,9 +23,28 @@ export function handlePaste(
 	const htmlContent = clipboard.getData("text/html");
 	const plainContent = clipboard.getData("text/plain");
 	if (htmlContent && looksLikeRealHtml(htmlContent, plainContent)) {
-		evt.preventDefault();
-		handleHtmlTextPaste(htmlContent, editor);
-		return;
+		if (settings.htmlContentPasteBehavior === "render") {
+			evt.preventDefault();
+			handleHtmlTextPaste(htmlContent, editor);
+			return;
+		}
+		if (settings.htmlContentPasteBehavior === "ask") {
+			evt.preventDefault();
+			void openContentPasteBehaviorModal(app).then((choice) => {
+				if (choice === "render") {
+					handleHtmlTextPaste(htmlContent, editor);
+				} else if (choice === "markdown") {
+					editor.replaceSelection(htmlToMarkdown(htmlContent));
+				} else {
+					editor.replaceSelection(plainContent);
+				}
+			}).catch(() => {
+				// Cancelled — convert to markdown as safe default
+				editor.replaceSelection(htmlToMarkdown(htmlContent));
+			});
+			return;
+		}
+		// "default" — fall through, let Obsidian handle it
 	}
 }
 
@@ -206,6 +225,77 @@ class PasteDestinationModal extends Modal {
 					}
 					this.resolved = true;
 					this.resolve(normalized);
+					this.close();
+				})
+			);
+	}
+
+	onClose(): void {
+		this.contentEl.empty();
+		if (!this.resolved) {
+			this.reject();
+		}
+	}
+}
+
+type ContentPasteChoice = "render" | "markdown" | "plain";
+
+function openContentPasteBehaviorModal(app: App): Promise<ContentPasteChoice> {
+	return new Promise((resolve, reject) => {
+		const modal = new ContentPasteBehaviorModal(app, resolve, reject);
+		modal.open();
+	});
+}
+
+class ContentPasteBehaviorModal extends Modal {
+	private resolve: (choice: ContentPasteChoice) => void;
+	private reject: () => void;
+	private resolved = false;
+
+	constructor(
+		app: App,
+		resolve: (choice: ContentPasteChoice) => void,
+		reject: () => void
+	) {
+		super(app);
+		this.resolve = resolve;
+		this.reject = reject;
+	}
+
+	onOpen(): void {
+		const { contentEl } = this;
+		contentEl.createEl("h3", { text: "Pasted HTML content detected" });
+		contentEl.createEl("p", { text: "How would you like to paste this?" });
+
+		new Setting(contentEl)
+			.setName("Render as HTML")
+			.setDesc("Insert as a live-rendered ```html code block.")
+			.addButton((btn) =>
+				btn.setButtonText("Render").setCta().onClick(() => {
+					this.resolved = true;
+					this.resolve("render");
+					this.close();
+				})
+			);
+
+		new Setting(contentEl)
+			.setName("Convert to Markdown")
+			.setDesc("Let Obsidian convert the HTML to formatted markdown.")
+			.addButton((btn) =>
+				btn.setButtonText("Markdown").onClick(() => {
+					this.resolved = true;
+					this.resolve("markdown");
+					this.close();
+				})
+			);
+
+		new Setting(contentEl)
+			.setName("Paste as plain text")
+			.setDesc("Insert the raw text without any formatting.")
+			.addButton((btn) =>
+				btn.setButtonText("Plain text").onClick(() => {
+					this.resolved = true;
+					this.resolve("plain");
 					this.close();
 				})
 			);

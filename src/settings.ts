@@ -2,17 +2,20 @@ import { App, PluginSettingTab, Setting } from "obsidian";
 import type PolyglotRendererPlugin from "./main";
 
 export type PasteDestination = "ask" | "note-folder" | "default-folder";
+export type HtmlContentPasteBehavior = "ask" | "render" | "default";
 
 export interface PolyglotSettings {
 	enableInlineHtml: boolean;
 	pasteDestination: PasteDestination;
 	defaultPasteFolder: string;
+	htmlContentPasteBehavior: HtmlContentPasteBehavior;
 }
 
 export const DEFAULT_SETTINGS: PolyglotSettings = {
 	enableInlineHtml: true,
 	pasteDestination: "ask",
 	defaultPasteFolder: "",
+	htmlContentPasteBehavior: "ask",
 };
 
 export class PolyglotSettingTab extends PluginSettingTab {
@@ -52,6 +55,21 @@ export class PolyglotSettingTab extends PluginSettingTab {
 						this.plugin.settings.pasteDestination = value as PasteDestination;
 						await this.plugin.saveSettings();
 						this.display();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("HTML content paste behavior")
+			.setDesc("When pasting HTML content (e.g. from a browser), render it as a live HTML block or use Obsidian's default paste.")
+			.addDropdown((dropdown) =>
+				dropdown
+					.addOption("ask", "Ask every time")
+					.addOption("render", "Render as HTML block")
+					.addOption("default", "Obsidian default (markdown)")
+					.setValue(this.plugin.settings.htmlContentPasteBehavior)
+					.onChange(async (value) => {
+						this.plugin.settings.htmlContentPasteBehavior = value as HtmlContentPasteBehavior;
+						await this.plugin.saveSettings();
 					})
 			);
 

@@ -1,16 +1,12 @@
 import { App, PluginSettingTab, Setting } from "obsidian";
 import type PolyglotRendererPlugin from "./main";
 
-export type HtmlSecurityMode = "sandbox" | "trusted";
-
 export interface PolyglotSettings {
 	enableInlineHtml: boolean;
-	htmlSecurityMode: HtmlSecurityMode;
 }
 
 export const DEFAULT_SETTINGS: PolyglotSettings = {
 	enableInlineHtml: true,
-	htmlSecurityMode: "sandbox",
 };
 
 export class PolyglotSettingTab extends PluginSettingTab {
@@ -33,20 +29,6 @@ export class PolyglotSettingTab extends PluginSettingTab {
 					.setValue(this.plugin.settings.enableInlineHtml)
 					.onChange(async (value) => {
 						this.plugin.settings.enableInlineHtml = value;
-						await this.plugin.saveSettings();
-					})
-			);
-
-		new Setting(containerEl)
-			.setName("HTML security mode")
-			.setDesc("Sandbox (default): renders in an isolated iframe, blocks scripts. Trusted: renders directly, allows all HTML.")
-			.addDropdown((dropdown) =>
-				dropdown
-					.addOption("sandbox", "Sandbox (safe)")
-					.addOption("trusted", "Trusted (unsafe)")
-					.setValue(this.plugin.settings.htmlSecurityMode)
-					.onChange(async (value) => {
-						this.plugin.settings.htmlSecurityMode = value as HtmlSecurityMode;
 						await this.plugin.saveSettings();
 					})
 			);

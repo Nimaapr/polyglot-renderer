@@ -1,6 +1,6 @@
 import { Plugin } from "obsidian";
 import { DEFAULT_SETTINGS, PolyglotSettings, PolyglotSettingTab } from "./settings";
-import { renderHtmlBlock } from "./renderers/html-renderer";
+import { renderHtmlBlock } from "renderers/html-renderer";
 
 export default class PolyglotRendererPlugin extends Plugin {
 	settings: PolyglotSettings;

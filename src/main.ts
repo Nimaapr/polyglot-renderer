@@ -2,6 +2,7 @@ import { Plugin, WorkspaceLeaf } from "obsidian";
 import { DEFAULT_SETTINGS, PolyglotSettings, PolyglotSettingTab } from "./settings";
 import { renderHtmlBlock } from "renderers/html-renderer";
 import { HtmlFileView, VIEW_TYPE_HTML } from "views/html-file-view";
+import { handlePaste } from "paste-handler";
 
 export default class PolyglotRendererPlugin extends Plugin {
 	settings: PolyglotSettings;
@@ -22,6 +23,14 @@ export default class PolyglotRendererPlugin extends Plugin {
 			(leaf: WorkspaceLeaf) => new HtmlFileView(leaf)
 		);
 		this.registerExtensions(["html", "htm"], VIEW_TYPE_HTML);
+
+		// smart paste handler for HTML content
+		this.registerEvent(
+			this.app.workspace.on("editor-paste", (evt, editor, info) => {
+				handlePaste(evt, editor, info, this.app);
+			})
+		);
+
 	}
 
 	onunload() {

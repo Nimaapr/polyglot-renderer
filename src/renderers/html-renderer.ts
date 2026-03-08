@@ -11,6 +11,17 @@ export function renderHtmlBlock(
 		return;
 	}
 
+	createSandboxedIframe(source, container);
+}
+
+/**
+ * Creates a sandboxed iframe with auto-resize, suitable for both
+ * inline code blocks and embed post-processing.
+ */
+export function createSandboxedIframe(
+	source: string,
+	container: HTMLElement
+): HTMLIFrameElement {
 	const iframe = container.createEl("iframe", {
 		cls: "polyglot-html-sandbox",
 	});
@@ -57,6 +68,8 @@ export function renderHtmlBlock(
 	});
 
 	cleanupObserver.observe(container, { childList: true, subtree: true });
+
+	return iframe;
 }
 
 export function buildSandboxDocument(source: string): string {

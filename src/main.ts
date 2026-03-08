@@ -27,7 +27,7 @@ export default class PolyglotRendererPlugin extends Plugin {
 		// smart paste handler for HTML content
 		this.registerEvent(
 			this.app.workspace.on("editor-paste", (evt, editor, info) => {
-				handlePaste(evt, editor, info, this.app);
+				handlePaste(evt, editor, info, this.app, this.settings);
 			})
 		);
 

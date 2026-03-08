@@ -1,12 +1,18 @@
 import { App, PluginSettingTab, Setting } from "obsidian";
 import type PolyglotRendererPlugin from "./main";
 
+export type PasteDestination = "ask" | "note-folder" | "default-folder";
+
 export interface PolyglotSettings {
 	enableInlineHtml: boolean;
+	pasteDestination: PasteDestination;
+	defaultPasteFolder: string;
 }
 
 export const DEFAULT_SETTINGS: PolyglotSettings = {
 	enableInlineHtml: true,
+	pasteDestination: "ask",
+	defaultPasteFolder: "",
 };
 
 export class PolyglotSettingTab extends PluginSettingTab {
@@ -32,5 +38,36 @@ export class PolyglotSettingTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 					})
 			);
+
+		new Setting(containerEl)
+			.setName("HTML file paste destination")
+			.setDesc("Where to save HTML files when pasted into a note.")
+			.addDropdown((dropdown) =>
+				dropdown
+					.addOption("ask", "Ask every time")
+					.addOption("note-folder", "Current note folder")
+					.addOption("default-folder", "Default folder")
+					.setValue(this.plugin.settings.pasteDestination)
+					.onChange(async (value) => {
+						this.plugin.settings.pasteDestination = value as PasteDestination;
+						await this.plugin.saveSettings();
+						this.display();
+					})
+			);
+
+		if (this.plugin.settings.pasteDestination === "default-folder") {
+			new Setting(containerEl)
+				.setName("Default paste folder")
+				.setDesc("Folder path relative to vault root (e.g. \"assets/html\"). Created automatically if it doesn't exist.")
+				.addText((text) =>
+					text
+						.setPlaceholder("assets/html")
+						.setValue(this.plugin.settings.defaultPasteFolder)
+						.onChange(async (value) => {
+							this.plugin.settings.defaultPasteFolder = value.trim();
+							await this.plugin.saveSettings();
+						})
+				);
+		}
 	}
 }

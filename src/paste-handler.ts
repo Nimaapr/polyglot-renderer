@@ -1,18 +1,12 @@
-import { App, Editor, MarkdownFileInfo, MarkdownView, Notice, TFile, normalizePath } from "obsidian";
+import { App, Editor, MarkdownFileInfo, MarkdownView, Modal, Notice, Setting, normalizePath } from "obsidian";
+import type { PolyglotSettings } from "settings";
 
-/**
- * Handles paste events in the editor.
- *
- * - text/html clipboard: wraps the HTML source in a ```html code block
- *   so the inline renderer picks it up immediately.
- * - .html file blob (e.g. drag-drop from Finder): creates a .html file
- *   beside the current note and inserts a markdown link to it.
- */
 export function handlePaste(
 	evt: ClipboardEvent,
 	editor: Editor,
 	info: MarkdownView | MarkdownFileInfo,
-	app: App
+	app: App,
+	settings: PolyglotSettings
 ): void {
 	const clipboard = evt.clipboardData;
 	if (!clipboard) return;
@@ -21,13 +15,11 @@ export function handlePaste(
 	const htmlFile = findHtmlFile(clipboard);
 	if (htmlFile) {
 		evt.preventDefault();
-		void handleHtmlFilePaste(htmlFile, editor, info, app);
+		void handleHtmlFilePaste(htmlFile, editor, info, app, settings);
 		return;
 	}
 
 	// --- Case 2: pasted text/html content (e.g. copy from browser) ---
-	// Only intercept if there's HTML but also check it's not just plain text
-	// wrapped in trivial HTML by the OS. We look for actual tags beyond <meta>.
 	const htmlContent = clipboard.getData("text/html");
 	const plainContent = clipboard.getData("text/plain");
 	if (htmlContent && looksLikeRealHtml(htmlContent, plainContent)) {
@@ -35,13 +27,8 @@ export function handlePaste(
 		handleHtmlTextPaste(htmlContent, editor);
 		return;
 	}
-
-	// Otherwise, let Obsidian handle the paste normally.
 }
 
-/**
- * Check clipboard files for an .html/.htm file.
- */
 function findHtmlFile(clipboard: DataTransfer): File | null {
 	for (let i = 0; i < clipboard.files.length; i++) {
 		const file = clipboard.files[i];
@@ -52,13 +39,7 @@ function findHtmlFile(clipboard: DataTransfer): File | null {
 	return null;
 }
 
-/**
- * Heuristic: distinguish real HTML content from OS-wrapped plain text.
- * When you copy plain text, macOS often wraps it in minimal HTML.
- * We only intercept if the HTML has meaningful structure beyond that.
- */
 function looksLikeRealHtml(html: string, plain: string): boolean {
-	// Strip the common meta/span wrappers that macOS adds to plain text copies
 	const stripped = html
 		.replace(/<meta[^>]*>/gi, "")
 		.replace(/<\/?html>/gi, "")
@@ -69,45 +50,54 @@ function looksLikeRealHtml(html: string, plain: string): boolean {
 		.replace(/\s+/g, " ")
 		.trim();
 
-	// If after stripping wrappers the content is basically the plain text,
-	// it's not "real" HTML — let Obsidian paste it as plain text.
 	const normalizedPlain = plain.replace(/\s+/g, " ").trim();
 	if (stripped === normalizedPlain) return false;
 
-	// Check for meaningful HTML tags
 	return /<(div|table|ul|ol|h[1-6]|img|a\s|form|section|article|nav|header|footer|style|svg)/i.test(html);
 }
 
-/**
- * Embed pasted HTML text inline as a ```html code block.
- */
 function handleHtmlTextPaste(html: string, editor: Editor): void {
 	const codeBlock = "```html\n" + html.trim() + "\n```\n";
 	editor.replaceSelection(codeBlock);
 }
 
-/**
- * Create a .html file beside the current note and insert a link.
- */
 async function handleHtmlFilePaste(
 	file: File,
 	editor: Editor,
 	info: MarkdownView | MarkdownFileInfo,
-	app: App
+	app: App,
+	settings: PolyglotSettings
 ): Promise<void> {
-	try {
-		const noteFile = info.file;
+	const noteFile = info.file;
+	const noteDir = noteFile?.parent?.path ?? "";
+	const notePath = noteFile?.path ?? "";
 
-		// Resolve the directory: use the note's folder, or vault root as fallback
-		// for unsaved/new notes.
-		const noteDir = noteFile?.parent?.path ?? "";
-		const notePath = noteFile?.path ?? "";
+	let targetDir: string;
+
+	if (settings.pasteDestination === "ask") {
+		try {
+			targetDir = await openPasteDestinationModal(app, file.name, noteDir, settings.defaultPasteFolder);
+		} catch {
+			// User cancelled the modal
+			return;
+		}
+	} else if (settings.pasteDestination === "default-folder") {
+		targetDir = settings.defaultPasteFolder || "";
+	} else {
+		// "note-folder"
+		targetDir = noteDir;
+	}
+
+	try {
+		// Ensure the target directory exists
+		if (targetDir && !app.vault.getAbstractFileByPath(targetDir)) {
+			await app.vault.createFolder(targetDir);
+		}
 
 		const content = await file.text();
-
 		const baseName = file.name.replace(/\.html?$/i, "");
-		const fileName = await uniqueFileName(app, noteDir, baseName, "html");
-		const filePath = normalizePath(noteDir ? `${noteDir}/${fileName}` : fileName);
+		const fileName = await uniqueFileName(app, targetDir, baseName, "html");
+		const filePath = normalizePath(targetDir ? `${targetDir}/${fileName}` : fileName);
 
 		const createdFile = await app.vault.create(filePath, content);
 		const link = app.fileManager.generateMarkdownLink(createdFile, notePath);
@@ -119,8 +109,116 @@ async function handleHtmlFilePaste(
 }
 
 /**
- * Find a filename that doesn't collide with existing files.
+ * Modal that asks the user where to save the pasted HTML file.
+ * Returns the chosen directory path, or rejects if cancelled.
  */
+function openPasteDestinationModal(
+	app: App,
+	fileName: string,
+	noteDir: string,
+	defaultFolder: string
+): Promise<string> {
+	return new Promise((resolve, reject) => {
+		const modal = new PasteDestinationModal(app, fileName, noteDir, defaultFolder, resolve, reject);
+		modal.open();
+	});
+}
+
+class PasteDestinationModal extends Modal {
+	private fileName: string;
+	private noteDir: string;
+	private defaultFolder: string;
+	private resolve: (dir: string) => void;
+	private reject: () => void;
+	private resolved = false;
+
+	constructor(
+		app: App,
+		fileName: string,
+		noteDir: string,
+		defaultFolder: string,
+		resolve: (dir: string) => void,
+		reject: () => void
+	) {
+		super(app);
+		this.fileName = fileName;
+		this.noteDir = noteDir;
+		this.defaultFolder = defaultFolder;
+		this.resolve = resolve;
+		this.reject = reject;
+	}
+
+	onOpen(): void {
+		const { contentEl } = this;
+		contentEl.createEl("h3", { text: `Choose where to save "${this.fileName}"` });
+
+		const noteDirLabel = this.noteDir || "/";
+
+		new Setting(contentEl)
+			.setName("Current note folder")
+			.setDesc(noteDirLabel)
+			.addButton((btn) =>
+				btn.setButtonText("Save here").setCta().onClick(() => {
+					this.resolved = true;
+					this.resolve(this.noteDir);
+					this.close();
+				})
+			);
+
+		new Setting(contentEl)
+			.setName("Vault root")
+			.setDesc("/")
+			.addButton((btn) =>
+				btn.setButtonText("Save here").onClick(() => {
+					this.resolved = true;
+					this.resolve("");
+					this.close();
+				})
+			);
+
+		if (this.defaultFolder) {
+			new Setting(contentEl)
+				.setName("Default folder")
+				.setDesc(this.defaultFolder)
+				.addButton((btn) =>
+					btn.setButtonText("Save here").onClick(() => {
+						this.resolved = true;
+						this.resolve(this.defaultFolder);
+						this.close();
+					})
+				);
+		}
+
+		let customPath = "";
+		new Setting(contentEl)
+			.setName("Custom folder")
+			.addText((text) =>
+				text.setPlaceholder("path/to/folder").onChange((value) => {
+					customPath = value;
+				})
+			)
+			.addButton((btn) =>
+				btn.setButtonText("Save here").onClick(() => {
+					const normalized = normalizePath(customPath.trim());
+					if (!normalized) {
+						new Notice("Please enter a folder path.");
+						return;
+					}
+					this.resolved = true;
+					this.resolve(normalized);
+					this.close();
+				})
+			);
+	}
+
+	onClose(): void {
+		this.contentEl.empty();
+		if (!this.resolved) {
+			this.reject();
+		}
+	}
+}
+
 async function uniqueFileName(
 	app: App,
 	dir: string,

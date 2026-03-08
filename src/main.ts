@@ -1,6 +1,7 @@
-import { Plugin } from "obsidian";
+import { Plugin, WorkspaceLeaf } from "obsidian";
 import { DEFAULT_SETTINGS, PolyglotSettings, PolyglotSettingTab } from "./settings";
 import { renderHtmlBlock } from "renderers/html-renderer";
+import { HtmlFileView, VIEW_TYPE_HTML } from "views/html-file-view";
 
 export default class PolyglotRendererPlugin extends Plugin {
 	settings: PolyglotSettings;
@@ -14,6 +15,13 @@ export default class PolyglotRendererPlugin extends Plugin {
 		this.registerMarkdownCodeBlockProcessor("html", (source, el, _ctx) => {
 			renderHtmlBlock(source, el, this.settings);
 		});
+
+		// custom file view for .html files
+		this.registerView(
+			VIEW_TYPE_HTML,
+			(leaf: WorkspaceLeaf) => new HtmlFileView(leaf)
+		);
+		this.registerExtensions(["html", "htm"], VIEW_TYPE_HTML);
 	}
 
 	onunload() {

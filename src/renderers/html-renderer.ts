@@ -59,7 +59,7 @@ export function renderHtmlBlock(
 	cleanupObserver.observe(container, { childList: true, subtree: true });
 }
 
-function buildSandboxDocument(source: string): string {
+export function buildSandboxDocument(source: string): string {
 	return `<!DOCTYPE html>
 <html>
 <head>

@@ -1,5 +1,6 @@
 import { Plugin } from "obsidian";
 import { DEFAULT_SETTINGS, PolyglotSettings, PolyglotSettingTab } from "./settings";
+import { renderHtmlBlock } from "./renderers/html-renderer";
 
 export default class PolyglotRendererPlugin extends Plugin {
 	settings: PolyglotSettings;
@@ -9,7 +10,10 @@ export default class PolyglotRendererPlugin extends Plugin {
 
 		this.addSettingTab(new PolyglotSettingTab(this.app, this));
 
-		console.log("Polyglot Renderer loaded");
+		// inline HTML rendering for ```html code blocks
+		this.registerMarkdownCodeBlockProcessor("html", (source, el, _ctx) => {
+			renderHtmlBlock(source, el, this.settings);
+		});
 	}
 
 	onunload() {

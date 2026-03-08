@@ -39,8 +39,7 @@ export function handlePaste(
 					editor.replaceSelection(plainContent);
 				}
 			}).catch(() => {
-				// Cancelled — convert to markdown as safe default
-				editor.replaceSelection(htmlToMarkdown(htmlContent));
+				// Cancelled — do not paste anything.
 			});
 			return;
 		}
@@ -101,7 +100,11 @@ async function handleHtmlFilePaste(
 			return;
 		}
 	} else if (settings.pasteDestination === "default-folder") {
-		targetDir = settings.defaultPasteFolder || "";
+		if (!settings.defaultPasteFolder.trim()) {
+			new Notice("Set a default paste folder or switch the paste destination mode.");
+			return;
+		}
+		targetDir = settings.defaultPasteFolder.trim();
 	} else {
 		// "note-folder"
 		targetDir = noteDir;

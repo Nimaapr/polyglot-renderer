@@ -1,4 +1,4 @@
-import { App, Editor, MarkdownFileInfo, MarkdownView, TFile, normalizePath } from "obsidian";
+import { App, Editor, MarkdownFileInfo, MarkdownView, Notice, TFile, normalizePath } from "obsidian";
 
 /**
  * Handles paste events in the editor.
@@ -95,32 +95,26 @@ async function handleHtmlFilePaste(
 	info: MarkdownView | MarkdownFileInfo,
 	app: App
 ): Promise<void> {
-	const noteFile = info.file;
+	try {
+		const noteFile = info.file;
 
-	// Resolve the directory: use the note's folder, or vault root as fallback
-	// for unsaved/new notes
-	const noteDir = noteFile?.parent?.path ?? "";
-	const notePath = noteFile?.path ?? "";
+		// Resolve the directory: use the note's folder, or vault root as fallback
+		// for unsaved/new notes.
+		const noteDir = noteFile?.parent?.path ?? "";
+		const notePath = noteFile?.path ?? "";
 
-	// Read the file content
-	const content = await file.text();
+		const content = await file.text();
 
-	// Generate a unique filename to avoid collisions
-	const baseName = file.name.replace(/\.html?$/i, "");
-	const fileName = await uniqueFileName(app, noteDir, baseName, "html");
-	const filePath = normalizePath(noteDir ? `${noteDir}/${fileName}` : fileName);
+		const baseName = file.name.replace(/\.html?$/i, "");
+		const fileName = await uniqueFileName(app, noteDir, baseName, "html");
+		const filePath = normalizePath(noteDir ? `${noteDir}/${fileName}` : fileName);
 
-	// Create the file in the vault
-	await app.vault.create(filePath, content);
-
-	// Insert a link to the new file (clicking opens it in our file view)
-	const createdFile = app.vault.getAbstractFileByPath(filePath);
-	if (createdFile instanceof TFile) {
-		const link = app.fileManager.generateMarkdownLink(
-			createdFile,
-			notePath
-		);
+		const createdFile = await app.vault.create(filePath, content);
+		const link = app.fileManager.generateMarkdownLink(createdFile, notePath);
 		editor.replaceSelection(link + "\n");
+	} catch (error) {
+		console.error("Polyglot Renderer: failed to handle pasted HTML file", error);
+		new Notice("Failed to save pasted HTML file.");
 	}
 }
 

@@ -4,6 +4,7 @@ import { FormatRegistry, viewTypeFor } from "registry/format-registry";
 import { PolyglotFileView } from "views/polyglot-file-view";
 import { htmlRenderer } from "renderers/html-renderer";
 import { handlePaste } from "paste-handler";
+import { processEmbeds, startEmbedObserver } from "embed-processor";
 
 export default class PolyglotRendererPlugin extends Plugin {
 	settings: PolyglotSettings;
@@ -32,6 +33,15 @@ export default class PolyglotRendererPlugin extends Plugin {
 			);
 			this.registerExtensions(renderer.extensions, viewType);
 		}
+
+		// embed post-processor: adds render toggle to ![[file.html]] embeds
+		this.registerMarkdownPostProcessor((el) => {
+			processEmbeds(el, this.app, registry);
+		});
+
+		// MutationObserver to catch embeds added/re-rendered during live editing
+		const disconnectObserver = startEmbedObserver(this.app, registry);
+		this.register(() => disconnectObserver());
 
 		// smart paste handler for HTML content
 		this.registerEvent(

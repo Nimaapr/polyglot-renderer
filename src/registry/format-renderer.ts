@@ -18,4 +18,11 @@ export interface FormatRenderer {
 	 * handle updates efficiently (e.g. reuse an existing iframe).
 	 */
 	renderFile(content: string, container: HTMLElement): void;
+
+	/**
+	 * Render file content inline in a note (for ![[file]] embeds).
+	 * Should produce an auto-resizing element suitable for embedding.
+	 * If not provided, embeds for this format won't have a render toggle.
+	 */
+	renderEmbed?(content: string, container: HTMLElement): void;
 }

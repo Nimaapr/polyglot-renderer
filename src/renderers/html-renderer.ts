@@ -17,6 +17,10 @@ export const htmlRenderer: FormatRenderer = {
 		createSandboxedIframe(source, container);
 	},
 
+	renderEmbed(content: string, container: HTMLElement): void {
+		createSandboxedIframe(content, container);
+	},
+
 	renderFile(content: string, container: HTMLElement): void {
 		// Reuse existing iframe if present, otherwise create one
 		let iframe = container.querySelector<HTMLIFrameElement>(`iframe[${IFRAME_ATTR}]`);

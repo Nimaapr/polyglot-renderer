@@ -2,6 +2,7 @@ import { App, MarkdownView, TFile, setIcon } from "obsidian";
 import type { FormatRegistry } from "registry/format-registry";
 
 const PROCESSED_ATTR = "data-polyglot-embed";
+const SOURCE_PATH_ATTR = "data-polyglot-source-path";
 
 /**
  * Sets up a MutationObserver on the workspace container that watches for
@@ -40,15 +41,17 @@ export function startEmbedObserver(
 export function processEmbeds(
 	el: HTMLElement,
 	app: App,
-	registry: FormatRegistry
+	registry: FormatRegistry,
+	sourcePath?: string
 ): void {
-	scanForEmbeds(el, app, registry);
+	scanForEmbeds(el, app, registry, sourcePath);
 }
 
 function scanForEmbeds(
 	root: HTMLElement,
 	app: App,
-	registry: FormatRegistry
+	registry: FormatRegistry,
+	sourcePath?: string
 ): void {
 	const candidates: HTMLElement[] = [];
 
@@ -68,20 +71,35 @@ function scanForEmbeds(
 		const src = embed.getAttribute("src");
 		if (!src) continue;
 
-		const ext = src.split(".").pop()?.toLowerCase();
+		const linkpath = extractLinkpath(src);
+		const ext = linkpath.split(".").pop()?.toLowerCase();
 		if (!ext) continue;
 
 		const renderer = registry.getByExtension(ext);
 		if (!renderer || !renderer.renderEmbed) continue;
 
+		const resolvedSourcePath = sourcePath
+			?? embed.getAttribute(SOURCE_PATH_ATTR)
+			?? getActiveMarkdownSourcePath(app);
+		if (resolvedSourcePath) {
+			embed.setAttribute(SOURCE_PATH_ATTR, resolvedSourcePath);
+		}
+
 		embed.setAttribute(PROCESSED_ATTR, "");
-		attachToggle(embed, src, app, renderer.renderEmbed.bind(renderer));
+		attachToggle(
+			embed,
+			linkpath,
+			resolvedSourcePath,
+			app,
+			renderer.renderEmbed.bind(renderer)
+		);
 	}
 }
 
 function attachToggle(
 	embed: HTMLElement,
-	src: string,
+	linkpath: string,
+	sourcePath: string | null,
 	app: App,
 	renderEmbed: (content: string, container: HTMLElement) => void
 ): void {
@@ -139,7 +157,7 @@ function attachToggle(
 				cls: "polyglot-embed-content",
 			});
 
-			const file = app.metadataCache.getFirstLinkpathDest(src, "");
+			const file = app.metadataCache.getFirstLinkpathDest(linkpath, sourcePath ?? "");
 			if (file && file instanceof TFile) {
 				void app.vault.cachedRead(file).then((content) => {
 					if (renderContainer) {
@@ -153,4 +171,13 @@ function attachToggle(
 			rendered = true;
 		}
 	});
+}
+
+function extractLinkpath(src: string): string {
+	const withoutAlias = src.split("|")[0]?.trim() ?? "";
+	return withoutAlias.split("#")[0]?.trim() ?? "";
+}
+
+function getActiveMarkdownSourcePath(app: App): string | null {
+	return app.workspace.getActiveViewOfType(MarkdownView)?.file?.path ?? null;
 }

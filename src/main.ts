@@ -35,8 +35,8 @@ export default class PolyglotRendererPlugin extends Plugin {
 		}
 
 		// embed post-processor: adds render toggle to ![[file.html]] embeds
-		this.registerMarkdownPostProcessor((el) => {
-			processEmbeds(el, this.app, registry);
+		this.registerMarkdownPostProcessor((el, ctx) => {
+			processEmbeds(el, this.app, registry, ctx.sourcePath);
 		});
 
 		// MutationObserver to catch embeds added/re-rendered during live editing

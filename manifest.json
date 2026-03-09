@@ -1,9 +1,9 @@
 {
-	"id": "obsidian-polyglot-renderer",
+	"id": "polyglot-renderer",
 	"name": "Polyglot Renderer",
-	"version": "0.1.0",
+	"version": "1.0.0",
 	"minAppVersion": "1.5.0",
-	"description": "Render HTML (and future formats) inline in notes and as file views.",
+	"description": "Render HTML code blocks as live sandboxed previews, open HTML files in a custom view, and smartly handle HTML paste.",
 	"author": "nimaap",
 	"isDesktopOnly": false
 }

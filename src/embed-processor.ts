@@ -103,18 +103,10 @@ function attachToggle(
 	app: App,
 	renderEmbed: (content: string, container: HTMLElement) => void
 ): void {
-	embed.style.position = "relative";
-
 	const btn = embed.createEl("button", {
 		cls: "polyglot-embed-toggle",
 		attr: { "aria-label": "Render inline" },
 	});
-	btn.style.cssText =
-		"position:absolute;top:4px;right:4px;z-index:10;" +
-		"cursor:pointer;background:var(--background-secondary);" +
-		"border:1px solid var(--background-modifier-border);" +
-		"border-radius:4px;padding:4px;display:flex;align-items:center;" +
-		"color:var(--text-muted);";
 	setIcon(btn, "eye");
 
 	let rendered = false;

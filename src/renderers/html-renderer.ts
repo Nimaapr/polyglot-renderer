@@ -31,7 +31,6 @@ export const htmlRenderer: FormatRenderer = {
 			iframe.setAttribute(IFRAME_ATTR, "");
 			iframe.setAttribute("sandbox", "allow-same-origin");
 			iframe.setAttribute("referrerpolicy", "no-referrer");
-			iframe.style.cssText = "width:100%;height:100%;border:none;display:block;";
 			iframe.srcdoc = buildSandboxDocument(content);
 		}
 	},
@@ -52,10 +51,6 @@ export function createSandboxedIframe(
 	iframe.setAttribute("sandbox", "allow-same-origin");
 	iframe.setAttribute("referrerpolicy", "no-referrer");
 	iframe.setAttribute("scrolling", "no");
-	iframe.style.width = "100%";
-	iframe.style.border = "none";
-	iframe.style.display = "block";
-	iframe.style.overflow = "hidden";
 	iframe.srcdoc = buildSandboxDocument(source);
 
 	let resizeObserver: ResizeObserver | null = null;

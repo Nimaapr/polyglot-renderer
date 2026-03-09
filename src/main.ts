@@ -53,7 +53,7 @@ export default class PolyglotRendererPlugin extends Plugin {
 	}
 
 	onunload() {
-		console.log("Polyglot Renderer unloaded");
+		console.debug("Polyglot Renderer unloaded");
 	}
 
 	async loadSettings() {

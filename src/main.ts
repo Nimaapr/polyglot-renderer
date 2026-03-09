@@ -1,7 +1,8 @@
 import { Plugin, WorkspaceLeaf } from "obsidian";
 import { DEFAULT_SETTINGS, PolyglotSettings, PolyglotSettingTab } from "./settings";
-import { renderHtmlBlock } from "renderers/html-renderer";
-import { HtmlFileView, VIEW_TYPE_HTML } from "views/html-file-view";
+import { FormatRegistry, viewTypeFor } from "registry/format-registry";
+import { PolyglotFileView } from "views/polyglot-file-view";
+import { htmlRenderer } from "renderers/html-renderer";
 import { handlePaste } from "paste-handler";
 
 export default class PolyglotRendererPlugin extends Plugin {
@@ -12,17 +13,25 @@ export default class PolyglotRendererPlugin extends Plugin {
 
 		this.addSettingTab(new PolyglotSettingTab(this.app, this));
 
-		// inline HTML rendering for ```html code blocks
-		this.registerMarkdownCodeBlockProcessor("html", (source, el, _ctx) => {
-			renderHtmlBlock(source, el, this.settings);
-		});
+		// Build format registry
+		const registry = new FormatRegistry();
+		registry.register(htmlRenderer);
 
-		// custom file view for .html files
-		this.registerView(
-			VIEW_TYPE_HTML,
-			(leaf: WorkspaceLeaf) => new HtmlFileView(leaf)
-		);
-		this.registerExtensions(["html", "htm"], VIEW_TYPE_HTML);
+		// Register all format renderers
+		for (const renderer of registry.all()) {
+			// inline code block rendering
+			this.registerMarkdownCodeBlockProcessor(renderer.lang, (source, el, _ctx) => {
+				renderer.renderInline(source, el, this.settings);
+			});
+
+			// file view for each format
+			const viewType = viewTypeFor(renderer.lang);
+			this.registerView(
+				viewType,
+				(leaf: WorkspaceLeaf) => new PolyglotFileView(leaf, renderer, viewType)
+			);
+			this.registerExtensions(renderer.extensions, viewType);
+		}
 
 		// smart paste handler for HTML content
 		this.registerEvent(

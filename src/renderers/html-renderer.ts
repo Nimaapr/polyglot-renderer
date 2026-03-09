@@ -1,21 +1,40 @@
+import type { FormatRenderer } from "registry/format-renderer";
 import type { PolyglotSettings } from "settings";
 
-export function renderHtmlBlock(
-	source: string,
-	container: HTMLElement,
-	settings: PolyglotSettings
-): void {
-	if (!settings.enableInlineHtml) {
-		const pre = container.createEl("pre");
-		pre.createEl("code", { text: source });
-		return;
-	}
+const IFRAME_ATTR = "data-polyglot-iframe";
 
-	createSandboxedIframe(source, container);
-}
+export const htmlRenderer: FormatRenderer = {
+	lang: "html",
+	extensions: ["html", "htm"],
+	icon: "code",
+
+	renderInline(source: string, container: HTMLElement, settings: PolyglotSettings): void {
+		if (!settings.enableInlineHtml) {
+			const pre = container.createEl("pre");
+			pre.createEl("code", { text: source });
+			return;
+		}
+		createSandboxedIframe(source, container);
+	},
+
+	renderFile(content: string, container: HTMLElement): void {
+		// Reuse existing iframe if present, otherwise create one
+		let iframe = container.querySelector<HTMLIFrameElement>(`iframe[${IFRAME_ATTR}]`);
+		if (iframe) {
+			iframe.srcdoc = buildSandboxDocument(content);
+		} else {
+			iframe = container.createEl("iframe", { cls: "polyglot-html-file-iframe" });
+			iframe.setAttribute(IFRAME_ATTR, "");
+			iframe.setAttribute("sandbox", "allow-same-origin");
+			iframe.setAttribute("referrerpolicy", "no-referrer");
+			iframe.style.cssText = "width:100%;height:100%;border:none;display:block;";
+			iframe.srcdoc = buildSandboxDocument(content);
+		}
+	},
+};
 
 /**
- * Creates a sandboxed iframe with auto-resize, suitable for both
+ * Creates a sandboxed iframe with auto-resize, suitable for
  * inline code blocks and embed post-processing.
  */
 export function createSandboxedIframe(

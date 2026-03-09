@@ -1,6 +1,6 @@
 {
 	"name": "polyglot-renderer",
-	"version": "1.0.0",
+	"version": "1.1.0",
 	"description": "Render HTML and other formats inline in Obsidian notes.",
 	"main": "main.js",
 	"type": "module",

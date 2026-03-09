@@ -12,10 +12,10 @@ export function handlePaste(
 	if (!clipboard) return;
 
 	// --- Case 1: pasted HTML file/blob (e.g. from Finder) ---
-	const htmlFile = findHtmlFile(clipboard);
-	if (htmlFile) {
+	const htmlFiles = findHtmlFiles(clipboard);
+	if (htmlFiles.length > 0) {
 		evt.preventDefault();
-		void handleHtmlFilePaste(htmlFile, editor, info, app, settings);
+		void handleHtmlFilesPaste(htmlFiles, editor, info, app, settings);
 		return;
 	}
 
@@ -47,31 +47,48 @@ export function handlePaste(
 	}
 }
 
-function findHtmlFile(clipboard: DataTransfer): File | null {
+function findHtmlFiles(clipboard: DataTransfer): File[] {
+	const files: File[] = [];
 	for (let i = 0; i < clipboard.files.length; i++) {
 		const file = clipboard.files[i];
 		if (file && /\.html?$/i.test(file.name)) {
-			return file;
+			files.push(file);
 		}
 	}
-	return null;
+	return files;
 }
 
 function looksLikeRealHtml(html: string, plain: string): boolean {
-	const stripped = html
-		.replace(/<meta[^>]*>/gi, "")
-		.replace(/<\/?html>/gi, "")
-		.replace(/<\/?head>/gi, "")
-		.replace(/<\/?body>/gi, "")
-		.replace(/<\/?span[^>]*>/gi, "")
+	// Extract pure text content by stripping ALL HTML tags
+	const textContent = html
 		.replace(/<!--[\s\S]*?-->/g, "")
+		.replace(/<style[\s\S]*?<\/style>/gi, "")
+		.replace(/<script[\s\S]*?<\/script>/gi, "")
+		.replace(/<[^>]*>/g, "")
+		.replace(/&nbsp;/gi, " ")
+		.replace(/&amp;/gi, "&")
+		.replace(/&lt;/gi, "<")
+		.replace(/&gt;/gi, ">")
+		.replace(/&quot;/gi, "\"")
 		.replace(/\s+/g, " ")
 		.trim();
 
 	const normalizedPlain = plain.replace(/\s+/g, " ").trim();
-	if (stripped === normalizedPlain) return false;
 
-	return /<(div|table|ul|ol|h[1-6]|img|a\s|form|section|article|nav|header|footer|style|svg)/i.test(html);
+	// If text content matches the plain text, the HTML is just a
+	// formatted wrapper (e.g. copying within Obsidian). Only flag it
+	// if it has rich indicators that markdown can't represent.
+	if (textContent === normalizedPlain) {
+		return /<style[\s>]/i.test(html)
+			|| /<svg[\s>]/i.test(html)
+			|| /style\s*=\s*"/i.test(html);
+	}
+
+	// Text content differs — HTML has extra content (images, etc.)
+	// Only flag on elements that suggest real web content, not basic
+	// document structure that any copy produces.
+	return /<(table|img|svg|canvas|video|audio|iframe|style|form)/i.test(html)
+		|| /style\s*=\s*"/i.test(html);
 }
 
 function handleHtmlTextPaste(html: string, editor: Editor): void {
@@ -79,8 +96,8 @@ function handleHtmlTextPaste(html: string, editor: Editor): void {
 	editor.replaceSelection(codeBlock);
 }
 
-async function handleHtmlFilePaste(
-	file: File,
+async function handleHtmlFilesPaste(
+	files: File[],
 	editor: Editor,
 	info: MarkdownView | MarkdownFileInfo,
 	app: App,
@@ -90,11 +107,12 @@ async function handleHtmlFilePaste(
 	const noteDir = noteFile?.parent?.path ?? "";
 	const notePath = noteFile?.path ?? "";
 
+	const fileNames = files.map((f) => f.name).join(", ");
 	let targetDir: string;
 
 	if (settings.pasteDestination === "ask") {
 		try {
-			targetDir = await openPasteDestinationModal(app, file.name, noteDir, settings.defaultPasteFolder);
+			targetDir = await openPasteDestinationModal(app, fileNames, noteDir, settings.defaultPasteFolder);
 		} catch {
 			// User cancelled the modal
 			return;
@@ -116,17 +134,23 @@ async function handleHtmlFilePaste(
 			await app.vault.createFolder(targetDir);
 		}
 
-		const content = await file.text();
-		const baseName = file.name.replace(/\.html?$/i, "");
-		const fileName = await uniqueFileName(app, targetDir, baseName, "html");
-		const filePath = normalizePath(targetDir ? `${targetDir}/${fileName}` : fileName);
+		const links: string[] = [];
+		for (const file of files) {
+			const content = await file.text();
+			const baseName = file.name.replace(/\.html?$/i, "");
+			const fileName = await uniqueFileName(app, targetDir, baseName, "html");
+			const filePath = normalizePath(targetDir ? `${targetDir}/${fileName}` : fileName);
 
-		const createdFile = await app.vault.create(filePath, content);
-		const link = app.fileManager.generateMarkdownLink(createdFile, notePath);
-		editor.replaceSelection(link + "\n");
+			const createdFile = await app.vault.create(filePath, content);
+			const link = app.fileManager.generateMarkdownLink(createdFile, notePath);
+			// Prepend ! to make it an embed link so the render toggle works
+			const embedLink = link.startsWith("!") ? link : "!" + link;
+			links.push(embedLink);
+		}
+		editor.replaceSelection(links.join("\n") + "\n");
 	} catch (error) {
-		console.error("Polyglot Renderer: failed to handle pasted HTML file", error);
-		new Notice("Failed to save pasted HTML file.");
+		console.error("Polyglot Renderer: failed to handle pasted HTML files", error);
+		new Notice("Failed to save pasted HTML files.");
 	}
 }
 

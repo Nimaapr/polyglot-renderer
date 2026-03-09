@@ -27,7 +27,7 @@ Link to an HTML file with `![[file.html]]` and use the eye toggle button to rend
 
 ### Smart paste handling
 
-**Pasting an HTML file** (e.g. from Finder): saves it to your vault and inserts a link. You can configure where files are saved — current note folder, a default folder, or ask every time.
+**Pasting HTML files** (e.g. from Finder): saves them to your vault and inserts embed links so they can be rendered inline with the embed toggle. You can configure where files are saved — current note folder, a default folder, or ask every time.
 
 **Pasting HTML content** (e.g. from a browser): choose to render it as a live HTML block, convert to markdown, or paste as plain text. Configurable to always render, always use Obsidian's default, or ask every time.
 

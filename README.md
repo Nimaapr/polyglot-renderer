@@ -46,7 +46,7 @@ All HTML rendering uses sandboxed iframes (`sandbox="allow-same-origin"`). Scrip
 
 ## Installation
 
-Search for **Polyglot Renderer** in Obsidian's community plugins browser, or install manually:
+Install manually from the latest GitHub release:
 
 1. Download `main.js`, `manifest.json`, and `styles.css` from the latest release.
 2. Create a folder `polyglot-renderer` inside your vault's `.obsidian/plugins/` directory.

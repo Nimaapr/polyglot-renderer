@@ -28,7 +28,7 @@ export class PolyglotFileView extends FileView {
 		return this.renderer.extensions.includes(extension);
 	}
 
-	protected async onOpen(): Promise<void> {
+	protected onOpen(): Promise<void> {
 		const { contentEl } = this;
 		contentEl.empty();
 		contentEl.addClass("polyglot-file-view");
@@ -44,6 +44,7 @@ export class PolyglotFileView extends FileView {
 			);
 			this.hasRegisteredVaultEvents = true;
 		}
+		return Promise.resolve();
 	}
 
 	async onLoadFile(file: TFile): Promise<void> {
@@ -57,7 +58,8 @@ export class PolyglotFileView extends FileView {
 		await super.onUnloadFile(file);
 	}
 
-	protected async onClose(): Promise<void> {
+	protected onClose(): Promise<void> {
 		this.contentEl.empty();
+		return Promise.resolve();
 	}
 }

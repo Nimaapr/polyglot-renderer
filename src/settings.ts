@@ -60,12 +60,12 @@ export class PolyglotSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("HTML content paste behavior")
-			.setDesc("When pasting HTML content (e.g. from a browser), render it as a live HTML block or use Obsidian's default paste.")
+			.setDesc("When pasting HTML content from a browser, render it as a live HTML block or use Obsidian's default paste.")
 			.addDropdown((dropdown) =>
 				dropdown
 					.addOption("ask", "Ask every time")
 					.addOption("render", "Render as HTML block")
-					.addOption("default", "Obsidian default (markdown)")
+					.addOption("default", "Obsidian default (Markdown)")
 					.setValue(this.plugin.settings.htmlContentPasteBehavior)
 					.onChange(async (value) => {
 						this.plugin.settings.htmlContentPasteBehavior = value as HtmlContentPasteBehavior;
@@ -79,7 +79,7 @@ export class PolyglotSettingTab extends PluginSettingTab {
 				.setDesc("Folder path relative to vault root (e.g. \"assets/html\"). Created automatically if it doesn't exist.")
 				.addText((text) =>
 					text
-						.setPlaceholder("assets/html")
+						.setPlaceholder("Assets/html")
 						.setValue(this.plugin.settings.defaultPasteFolder)
 						.onChange(async (value) => {
 							this.plugin.settings.defaultPasteFolder = value.trim();

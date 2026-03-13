@@ -138,7 +138,7 @@ async function handleHtmlFilesPaste(
 		for (const file of files) {
 			const content = await file.text();
 			const baseName = file.name.replace(/\.html?$/i, "");
-			const fileName = await uniqueFileName(app, targetDir, baseName, "html");
+			const fileName = uniqueFileName(app, targetDir, baseName, "html");
 			const filePath = normalizePath(targetDir ? `${targetDir}/${fileName}` : fileName);
 
 			const createdFile = await app.vault.create(filePath, content);
@@ -239,7 +239,7 @@ class PasteDestinationModal extends Modal {
 		new Setting(contentEl)
 			.setName("Custom folder")
 			.addText((text) =>
-				text.setPlaceholder("path/to/folder").onChange((value) => {
+				text.setPlaceholder("Path/to/folder").onChange((value) => {
 					customPath = value;
 				})
 			)
@@ -307,7 +307,7 @@ class ContentPasteBehaviorModal extends Modal {
 
 		new Setting(contentEl)
 			.setName("Convert to Markdown")
-			.setDesc("Let Obsidian convert the HTML to formatted markdown.")
+			.setDesc("Let Obsidian convert the HTML to formatted Markdown.")
 			.addButton((btn) =>
 				btn.setButtonText("Markdown").onClick(() => {
 					this.resolved = true;
@@ -336,12 +336,12 @@ class ContentPasteBehaviorModal extends Modal {
 	}
 }
 
-async function uniqueFileName(
+function uniqueFileName(
 	app: App,
 	dir: string,
 	baseName: string,
 	ext: string
-): Promise<string> {
+): string {
 	let candidate = `${baseName}.${ext}`;
 	let counter = 1;
 	while (app.vault.getAbstractFileByPath(normalizePath(dir ? `${dir}/${candidate}` : candidate))) {

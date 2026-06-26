@@ -6,9 +6,10 @@ export class PolyglotFileView extends FileView {
 	private renderer: FormatRenderer;
 	private viewType: string;
 	private hasRegisteredVaultEvents = false;
-	private pendingScroll: number | null = null;
 	private lastScroll = 0;
-	private restoreObserver: ResizeObserver | null = null;
+	private pendingScroll: number | null = null;
+	private restoring = false;
+	private restoreCleanup: (() => void) | null = null;
 
 	constructor(leaf: WorkspaceLeaf, renderer: FormatRenderer, viewType: string) {
 		super(leaf);
@@ -33,7 +34,6 @@ export class PolyglotFileView extends FileView {
 	}
 
 	protected onOpen(): Promise<void> {
-		PolyglotFileView.dbg("onOpen | file =", this.file?.path);
 		const { contentEl } = this;
 		contentEl.empty();
 		contentEl.addClass("polyglot-file-view");
@@ -58,7 +58,6 @@ export class PolyglotFileView extends FileView {
 	}
 
 	async onLoadFile(file: TFile): Promise<void> {
-		PolyglotFileView.dbg("onLoadFile | file =", file.path);
 		await super.onLoadFile(file);
 		let content = await this.app.vault.cachedRead(file);
 		content = await inlineAssets(content, this.app, file.path);
@@ -66,38 +65,35 @@ export class PolyglotFileView extends FileView {
 	}
 
 	async onUnloadFile(file: TFile): Promise<void> {
-		PolyglotFileView.dbg("onUnloadFile | file =", file.path);
+		this.endRestore();
 		this.contentEl.empty();
 		await super.onUnloadFile(file);
 	}
 
 	protected onClose(): Promise<void> {
-		PolyglotFileView.dbg("onClose | file =", this.file?.path);
+		this.endRestore();
 		this.contentEl.empty();
 		return Promise.resolve();
 	}
 
 	// --- Scroll persistence ---------------------------------------------------
-	// The rendered content scrolls inside a sandboxed iframe, so its scroll
-	// position is invisible to Obsidian. We track it continuously and feed it
-	// through the view-state hooks so Obsidian can save/restore it like it does
-	// for Markdown. Survives tab switches and full restarts (persistent state).
-	//
-	// Key subtlety: when a tab is hidden Obsidian sets the pane to display:none,
-	// the iframe collapses to height 0 and fires a scroll event resetting
-	// scrollY to 0. We must NOT record that teardown reset, so the tracker only
-	// stores the position while the iframe is actually visible (clientHeight>0).
+	// The HTML content scrolls *inside* the sandboxed iframe (the iframe fills
+	// the pane). That internal scroll is invisible to Obsidian and resets to 0
+	// whenever the tab is hidden (display:none collapses the iframe). So we:
+	//   1. continuously track the position while visible (`lastScroll`),
+	//   2. feed it through the view-state hooks (deferred reconstruction +
+	//      app restart), and
+	//   3. restore it when the view becomes visible again (plain tab hide/show).
+	// The restore yields immediately to any user input and never runs for more
+	// than a moment, so it can't fight you while you read or expand sections.
 
 	getState(): Record<string, unknown> {
 		const state = super.getState();
-		PolyglotFileView.dbg("getState: saving scroll =", this.lastScroll);
 		if (this.lastScroll) state.scroll = this.lastScroll;
 		return state;
 	}
 
 	async setState(state: unknown, result: ViewStateResult): Promise<void> {
-		PolyglotFileView.dbg("setState received:", JSON.stringify(state));
-		// Let FileView load the file first (this triggers onLoadFile).
 		await super.setState(state, result);
 		this.captureScrollFromState(state);
 	}
@@ -115,23 +111,18 @@ export class PolyglotFileView extends FileView {
 
 	private captureScrollFromState(state: unknown): void {
 		const scroll = (state as { scroll?: unknown } | null)?.scroll;
-		PolyglotFileView.dbg("captureScrollFromState: state.scroll =", scroll, "(type", typeof scroll, ")");
 		if (typeof scroll === "number") {
 			this.lastScroll = scroll;
 			this.pendingScroll = scroll;
-			// Apply now in case the iframe is already loaded; the load listener
-			// attached in renderContent covers the not-yet-loaded case.
 			this.applyPendingScroll();
 		}
 	}
 
-	/** Render content and restore the pending scroll once the iframe reloads. */
 	private renderContent(content: string): void {
 		this.renderer.renderFile(content, this.contentEl);
 		const iframe = this.getIframe();
 		if (iframe) {
 			iframe.addEventListener("load", () => {
-				PolyglotFileView.dbg("iframe 'load' | pendingScroll =", this.pendingScroll, "| iframe.clientHeight =", iframe.clientHeight);
 				this.attachScrollTracker(iframe);
 				this.applyPendingScroll();
 			}, { once: true });
@@ -139,10 +130,9 @@ export class PolyglotFileView extends FileView {
 	}
 
 	/**
-	 * When the tab is switched away, Obsidian hides the pane with display:none
-	 * (without reconstructing the view). That collapses the iframe and resets
-	 * its internal scroll to 0, and no state hook fires to restore it. Watch the
-	 * view container for the hidden→visible transition and re-apply the scroll.
+	 * Re-apply the saved scroll when the view goes from hidden back to visible
+	 * (a plain tab switch hides the pane with display:none without
+	 * reconstructing the view, which collapses the iframe and resets its scroll).
 	 */
 	private setupVisibilityRestore(): void {
 		if (typeof ResizeObserver === "undefined") return;
@@ -150,7 +140,6 @@ export class PolyglotFileView extends FileView {
 		const ro = new ResizeObserver(() => {
 			const visible = this.contentEl.clientHeight > 0;
 			if (visible && wasHidden && this.lastScroll > 0) {
-				PolyglotFileView.dbg("visibility restore -> scroll =", this.lastScroll);
 				this.pendingScroll = this.lastScroll;
 				this.applyPendingScroll();
 			}
@@ -161,15 +150,15 @@ export class PolyglotFileView extends FileView {
 	}
 
 	/**
-	 * Continuously record the iframe's scroll position — but only while the
-	 * iframe is visible, so the display:none teardown reset (clientHeight 0,
-	 * scrollY 0) doesn't clobber the value Obsidian is about to persist.
+	 * Track the iframe's scroll position — only while it is visible (so the
+	 * display:none teardown reset doesn't clobber it) and not mid-restore (so
+	 * our own scrollTo calls aren't mistaken for the user scrolling).
 	 */
 	private attachScrollTracker(iframe: HTMLIFrameElement): void {
 		const win = iframe.contentWindow;
 		if (!win) return;
 		win.addEventListener("scroll", () => {
-			if (iframe.clientHeight > 0) {
+			if (iframe.clientHeight > 0 && !this.restoring) {
 				this.lastScroll = win.scrollY;
 			}
 		}, true);
@@ -180,60 +169,62 @@ export class PolyglotFileView extends FileView {
 	}
 
 	/**
-	 * Restore the pending scroll. The target document is often still laying out
-	 * its full height when this runs — a tall, image-heavy file only reaches its
-	 * final height once the (base64-inlined) images finish decoding. So rather
-	 * than a fixed frame budget, re-apply the scroll as the content grows (via a
-	 * ResizeObserver on the document and image load events) until the target is
-	 * actually reached, or a deadline passes.
+	 * Restore the pending scroll into the iframe. The document may still be
+	 * growing (images decoding) so the target isn't always reachable on the
+	 * first try — re-apply for a short, bounded window. Crucially, abort the
+	 * instant the user interacts (wheel/click/key/touch) so the restore can
+	 * never trap the view at a position the user is trying to leave.
 	 */
 	private applyPendingScroll(): void {
 		if (this.pendingScroll === null) return;
 		const y = this.pendingScroll;
+		const win = this.getIframe()?.contentWindow;
+		if (!win) return;
 
-		// Cancel any in-flight restore from a previous call.
-		this.restoreObserver?.disconnect();
-		this.restoreObserver = null;
+		this.endRestore();
+		this.restoring = true;
 
-		const reach = (): boolean => {
-			const win = this.getIframe()?.contentWindow;
-			if (!win) return true; // iframe gone — stop trying
-			win.scrollTo(0, y);
-			return Math.abs(win.scrollY - y) <= 1;
+		const deadline = Date.now() + 1500;
+		let rafId = 0;
+
+		const finish = (): void => {
+			cancelAnimationFrame(rafId);
+			win.removeEventListener("wheel", onUserInput, true);
+			win.removeEventListener("keydown", onUserInput, true);
+			win.removeEventListener("mousedown", onUserInput, true);
+			win.removeEventListener("touchstart", onUserInput, true);
+			this.restoreCleanup = null;
+			this.restoring = false;
 		};
 
-		if (reach()) {
-			PolyglotFileView.dbg("applyPendingScroll: reached", y, "immediately");
-			return;
-		}
+		const onUserInput = (): void => finish();
 
-		const doc = this.getIframe()?.contentDocument;
-		const docEl = doc?.documentElement;
-		const deadline = Date.now() + 5000;
+		const tick = (): void => {
+			if (this.getIframe()?.contentWindow !== win) { finish(); return; }
+			win.scrollTo(0, y);
+			if (Math.abs(safeScrollY(win) - y) <= 1 || Date.now() > deadline) { finish(); return; }
+			rafId = requestAnimationFrame(tick);
+		};
 
-		if (docEl && typeof ResizeObserver !== "undefined") {
-			const ro = new ResizeObserver(() => {
-				if (reach() || Date.now() > deadline) {
-					ro.disconnect();
-					if (this.restoreObserver === ro) this.restoreObserver = null;
-					PolyglotFileView.dbg("applyPendingScroll: settled at", this.getIframe()?.contentWindow?.scrollY, "| target =", y);
-				}
-			});
-			ro.observe(docEl);
-			this.restoreObserver = ro;
-			this.register(() => ro.disconnect());
-		}
+		win.addEventListener("wheel", onUserInput, true);
+		win.addEventListener("keydown", onUserInput, true);
+		win.addEventListener("mousedown", onUserInput, true);
+		win.addEventListener("touchstart", onUserInput, true);
 
-		// Also nudge on each image load, in case ResizeObserver batches the reflow.
-		const images = doc?.images;
-		if (images) {
-			for (const img of Array.from(images)) {
-				if (!img.complete) img.addEventListener("load", () => reach(), { once: true });
-			}
-		}
+		this.restoreCleanup = () => finish();
+		tick();
 	}
 
-	private static dbg(...args: unknown[]): void {
-		console.log("[Polyglot scroll]", ...args);
+	private endRestore(): void {
+		this.restoreCleanup?.();
+		this.restoring = false;
+	}
+}
+
+function safeScrollY(win: Window): number {
+	try {
+		return win.scrollY;
+	} catch {
+		return 0;
 	}
 }

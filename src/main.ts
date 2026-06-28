@@ -64,10 +64,21 @@ export default class PolyglotRendererPlugin extends Plugin {
 			})
 		);
 
-		// Listen for link-open requests from sandboxed iframes
+		// Listen for link-open requests from sandboxed iframes.
+		// Do not filter on e.origin: opaque sandboxed frames report origin
+		// "null". Validate the URL scheme instead and only open http(s),
+		// ignoring javascript:, file:, and anything else.
 		const onMessage = (e: MessageEvent) => {
 			if (e.data?.type === "polyglot-open-url" && typeof e.data.url === "string") {
-				window.open(e.data.url);
+				let parsed: URL;
+				try {
+					parsed = new URL(e.data.url);
+				} catch {
+					return;
+				}
+				if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+					window.open(e.data.url);
+				}
 			}
 		};
 		window.addEventListener("message", onMessage);

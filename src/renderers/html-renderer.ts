@@ -169,6 +169,59 @@ document.addEventListener('click', function(e) {
 		if (e.target && e.target.tagName === 'IMG') reportHeight();
 	}, true);
 })();
+
+// Scroll persistence. The frame is opaque to the parent, so the parent cannot
+// read or set this frame's scroll. Instead the frame reports its own scroll
+// position (throttled) and, when the parent asks, restores to a target itself.
+(function() {
+	var restoring = false;
+
+	var scrollRaf = 0;
+	function report() {
+		scrollRaf = 0;
+		if (restoring) return;
+		window.parent.postMessage({type: 'polyglot-scroll', y: window.scrollY}, '*');
+	}
+	window.addEventListener('scroll', function() {
+		if (!scrollRaf) scrollRaf = requestAnimationFrame(report);
+	}, true);
+
+	function restoreScroll(y) {
+		restoring = true;
+		var rafId = 0;
+		var deadline = Date.now() + 1500;
+		function cleanup() {
+			cancelAnimationFrame(rafId);
+			window.removeEventListener('wheel', onInput, true);
+			window.removeEventListener('keydown', onInput, true);
+			window.removeEventListener('mousedown', onInput, true);
+			window.removeEventListener('touchstart', onInput, true);
+			restoring = false;
+		}
+		// Yield the instant the user interacts so the restore can never trap
+		// the view at a position the user is trying to leave.
+		function onInput() { cleanup(); }
+		function tick() {
+			window.scrollTo(0, y);
+			// The document may still be growing (images decoding) so the target
+			// isn't always reachable on the first try; retry for a short window.
+			if (Math.abs(window.scrollY - y) <= 1 || Date.now() > deadline) { cleanup(); return; }
+			rafId = requestAnimationFrame(tick);
+		}
+		window.addEventListener('wheel', onInput, true);
+		window.addEventListener('keydown', onInput, true);
+		window.addEventListener('mousedown', onInput, true);
+		window.addEventListener('touchstart', onInput, true);
+		tick();
+	}
+
+	window.addEventListener('message', function(e) {
+		if (e.source !== window.parent) return;
+		if (e.data && e.data.type === 'polyglot-restore-scroll' && typeof e.data.y === 'number') {
+			restoreScroll(e.data.y);
+		}
+	});
+})();
 </script>
 </head>
 <body>${source}</body>

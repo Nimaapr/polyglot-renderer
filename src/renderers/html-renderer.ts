@@ -222,6 +222,26 @@ document.addEventListener('click', function(e) {
 		}
 	});
 })();
+
+// Forward app keyboard shortcuts to the host. Keyboard events do not cross the
+// frame boundary, so while focus is inside this frame the app's hotkeys (e.g.
+// Ctrl+Tab to switch tabs) would otherwise be swallowed. Only modifier combos
+// are forwarded (plain typing is left to the frame), and only trusted events,
+// so page scripts cannot synthesize shortcuts.
+window.addEventListener('keydown', function(e) {
+	if (!e.isTrusted) return;
+	if (!(e.ctrlKey || e.metaKey || e.altKey)) return;
+	window.parent.postMessage({
+		type: 'polyglot-key',
+		key: e.key,
+		code: e.code,
+		keyCode: e.keyCode,
+		ctrlKey: e.ctrlKey,
+		metaKey: e.metaKey,
+		altKey: e.altKey,
+		shiftKey: e.shiftKey
+	}, '*');
+}, true);
 </script>
 </head>
 <body>${source}</body>

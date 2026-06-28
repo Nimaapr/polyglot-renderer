@@ -79,6 +79,28 @@ export default class PolyglotRendererPlugin extends Plugin {
 				if (parsed.protocol === "http:" || parsed.protocol === "https:") {
 					window.open(e.data.url);
 				}
+			} else if (e.data?.type === "polyglot-key") {
+				// Re-dispatch a shortcut forwarded from a focused sandboxed iframe
+				// so the app's global hotkeys (e.g. Ctrl+Tab) still fire — keyboard
+				// events otherwise don't cross the frame boundary.
+				const k = e.data;
+				const evt = new KeyboardEvent("keydown", {
+					key: typeof k.key === "string" ? k.key : "",
+					code: typeof k.code === "string" ? k.code : "",
+					ctrlKey: !!k.ctrlKey,
+					metaKey: !!k.metaKey,
+					altKey: !!k.altKey,
+					shiftKey: !!k.shiftKey,
+					bubbles: true,
+					cancelable: true,
+				});
+				// keyCode/which aren't settable via the constructor; some hotkey
+				// matchers still read them, so define them from the forwarded value.
+				if (typeof k.keyCode === "number") {
+					Object.defineProperty(evt, "keyCode", { get: () => k.keyCode });
+					Object.defineProperty(evt, "which", { get: () => k.keyCode });
+				}
+				document.dispatchEvent(evt);
 			}
 		};
 		window.addEventListener("message", onMessage);

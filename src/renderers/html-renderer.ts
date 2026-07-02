@@ -120,6 +120,13 @@ export function buildSandboxDocument(source: string): string {
 	pre {
 		white-space: pre-wrap;
 	}
+	::highlight(polyglot-find) {
+		background-color: rgba(255, 214, 0, 0.4);
+	}
+	::highlight(polyglot-find-current) {
+		background-color: #ff9632;
+		color: #000;
+	}
 </style>
 <script>
 document.addEventListener('click', function(e) {
@@ -242,6 +249,103 @@ window.addEventListener('keydown', function(e) {
 		shiftKey: e.shiftKey
 	}, '*');
 }, true);
+
+// Find within the frame. The parent can't read this opaque document, so it
+// sends a query and the frame searches its own DOM, highlights matches with the
+// CSS Custom Highlight API (no DOM mutation), scrolls to the current match, and
+// reports the counts back.
+(function() {
+	var ranges = [];
+	var current = -1;
+
+	function clear() {
+		ranges = [];
+		current = -1;
+		if (window.CSS && CSS.highlights) {
+			CSS.highlights.delete('polyglot-find');
+			CSS.highlights.delete('polyglot-find-current');
+		}
+	}
+
+	function paint() {
+		if (!(window.CSS && CSS.highlights && window.Highlight)) return;
+		var all = new Highlight();
+		for (var i = 0; i < ranges.length; i++) all.add(ranges[i]);
+		CSS.highlights.set('polyglot-find', all);
+		var cur = new Highlight();
+		if (current >= 0 && current < ranges.length) cur.add(ranges[current]);
+		CSS.highlights.set('polyglot-find-current', cur);
+	}
+
+	function scrollToCurrent() {
+		if (current < 0) return;
+		var rect = ranges[current].getBoundingClientRect();
+		var target = window.scrollY + rect.top - (window.innerHeight / 2);
+		window.scrollTo(0, target < 0 ? 0 : target);
+	}
+
+	function report() {
+		window.parent.postMessage({
+			type: 'polyglot-find-result',
+			matches: ranges.length,
+			current: ranges.length ? current + 1 : 0
+		}, '*');
+	}
+
+	// Only match text the user can actually see. The DOM also contains
+	// invisible text — inline <script>/<style> source and collapsed
+	// (display:none) sections — which would inflate the match count and
+	// make the current-match scroll jump to nothing.
+	function isSearchable(node) {
+		var el = node.parentElement;
+		if (!el) return false;
+		if (el.closest('script, style, noscript, title')) return false;
+		if (el.checkVisibility && !el.checkVisibility()) return false;
+		return true;
+	}
+
+	function find(query) {
+		clear();
+		if (query) {
+			var q = query.toLowerCase();
+			var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
+			var node;
+			while ((node = walker.nextNode())) {
+				if (!isSearchable(node)) continue;
+				var hay = node.nodeValue.toLowerCase();
+				var from = 0, idx;
+				while ((idx = hay.indexOf(q, from)) !== -1) {
+					var range = document.createRange();
+					range.setStart(node, idx);
+					range.setEnd(node, idx + q.length);
+					ranges.push(range);
+					from = idx + q.length;
+				}
+			}
+			current = ranges.length ? 0 : -1;
+		}
+		paint();
+		scrollToCurrent();
+		report();
+	}
+
+	function step(dir) {
+		if (!ranges.length) { report(); return; }
+		current = (current + dir + ranges.length) % ranges.length;
+		paint();
+		scrollToCurrent();
+		report();
+	}
+
+	window.addEventListener('message', function(e) {
+		if (e.source !== window.parent) return;
+		var d = e.data;
+		if (!d) return;
+		if (d.type === 'polyglot-find') find(String(d.query || ''));
+		else if (d.type === 'polyglot-find-step') step(d.dir === -1 ? -1 : 1);
+		else if (d.type === 'polyglot-find-clear') clear();
+	});
+})();
 </script>
 </head>
 <body>${source}</body>

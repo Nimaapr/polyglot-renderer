@@ -64,11 +64,27 @@ export default class PolyglotRendererPlugin extends Plugin {
 			})
 		);
 
+		// Only honour messages that come from one of this plugin's own sandboxed
+		// iframes. Matching is by frame identity (e.source === contentWindow),
+		// which stays readable cross-origin; e.origin is useless here because
+		// opaque sandboxed frames all report origin "null". Without this gate,
+		// any window could post e.g. polyglot-key and synthesize keystrokes.
+		const isPolyglotFrame = (source: MessageEventSource | null): boolean => {
+			if (!source) return false;
+			const frames = document.querySelectorAll<HTMLIFrameElement>(
+				"iframe.polyglot-html-sandbox, iframe.polyglot-html-file-iframe"
+			);
+			for (let i = 0; i < frames.length; i++) {
+				if (frames[i]?.contentWindow === source) return true;
+			}
+			return false;
+		};
+
 		// Listen for link-open requests from sandboxed iframes.
-		// Do not filter on e.origin: opaque sandboxed frames report origin
-		// "null". Validate the URL scheme instead and only open http(s),
-		// ignoring javascript:, file:, and anything else.
+		// Validate the URL scheme and only open http(s), ignoring
+		// javascript:, file:, and anything else.
 		const onMessage = (e: MessageEvent) => {
+			if (!isPolyglotFrame(e.source)) return;
 			if (e.data?.type === "polyglot-open-url" && typeof e.data.url === "string") {
 				let parsed: URL;
 				try {

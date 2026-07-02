@@ -21,6 +21,10 @@ Rendering happens inside a sandboxed iframe (`allow-scripts` only, no `allow-sam
 
 Open `.html` and `.htm` files directly in Obsidian. Files render in a sandboxed iframe and update live when you edit the source externally.
 
+- **Scroll position is remembered** — switch tabs or restart Obsidian and the view reopens where you left off.
+- **Find in document** — press `Ctrl/Cmd+F` to search the rendered HTML, with match highlighting, a match counter, and `Enter` / `Shift+Enter` to jump between results. Only visible text is matched.
+- **App shortcuts keep working** — keyboard shortcuts like `Ctrl+Tab` reach Obsidian even while your focus is inside the rendered content.
+
 ### Embed rendering
 
 Link to an HTML file with `![[file.html]]` and use the eye toggle button to render it inline without leaving your note.

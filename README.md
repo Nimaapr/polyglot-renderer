@@ -15,11 +15,15 @@ Write a fenced `html` code block and see it rendered live in a sandboxed iframe:
 ```
 ````
 
-Scripts are blocked — all rendering happens inside a sandboxed iframe with `allow-same-origin` only.
+Rendering happens inside a sandboxed iframe (`allow-scripts` only, no `allow-same-origin`). The block's own scripts and CSS run, but the frame is an opaque origin with no access to Obsidian or your vault.
 
 ### HTML file view
 
 Open `.html` and `.htm` files directly in Obsidian. Files render in a sandboxed iframe and update live when you edit the source externally.
+
+- **Scroll position is remembered** — switch tabs or restart Obsidian and the view reopens where you left off.
+- **Find in document** — press `Ctrl/Cmd+F` to search the rendered HTML, with match highlighting, a match counter, and `Enter` / `Shift+Enter` to jump between results. Only visible text is matched.
+- **App shortcuts keep working** — keyboard shortcuts like `Ctrl+Tab` reach Obsidian even while your focus is inside the rendered content.
 
 ### Embed rendering
 
@@ -42,7 +46,9 @@ Link to an HTML file with `![[file.html]]` and use the eye toggle button to rend
 
 ## Security
 
-All HTML rendering uses sandboxed iframes. Scripts run inside the sandbox so interactive HTML files work as expected (collapsible sections, table of contents navigation, etc.). External links open in your default browser. The sandbox prevents access to Obsidian internals, network requests, and top-level navigation.
+All HTML rendering uses sandboxed iframes created with `allow-scripts` but **without** `allow-same-origin`. Inline scripts and CSS in the rendered HTML do run, so interactive HTML files work as expected (collapsible sections, table of contents navigation, and so on). Crucially, the frame runs in an opaque origin it cannot escape: it has no access to Obsidian internals, the vault, the file system, or `window.parent`, and cannot perform top-level navigation. External links are opened in your default browser by the plugin, and only `http:` and `https:` links are honoured.
+
+Because the frame is an opaque origin, same-origin browser APIs such as `localStorage` and `sessionStorage` are unavailable (they throw) inside rendered HTML. This is the intended security tradeoff: rendered content is treated as untrusted and kept fully isolated from the host.
 
 ## Installation
 

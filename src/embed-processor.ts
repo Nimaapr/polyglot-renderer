@@ -3,6 +3,7 @@ import type { FormatRegistry } from "registry/format-registry";
 
 const PROCESSED_ATTR = "data-polyglot-embed";
 const SOURCE_PATH_ATTR = "data-polyglot-source-path";
+const TOGGLE_CLASS = "polyglot-embed-toggle";
 
 /**
  * Sets up a MutationObserver on the workspace container that watches for
@@ -26,6 +27,17 @@ export function startEmbedObserver(
 				if (node instanceof HTMLElement) {
 					scanForEmbeds(node, app, registry);
 				}
+			}
+
+			// Reading view loads embed content asynchronously and replaces the
+			// embed's children once the file resolves, which removes a toggle
+			// attached earlier. Re-ensure the toggle on the embed whose subtree
+			// just changed so it reappears (this is why it previously showed in
+			// live preview but not reading view).
+			const target = mutation.target;
+			if (target instanceof HTMLElement) {
+				const embed = target.closest<HTMLElement>(".internal-embed");
+				if (embed) ensureEmbedToggle(embed, app, registry);
 			}
 		}
 	});
@@ -55,45 +67,63 @@ function scanForEmbeds(
 ): void {
 	const candidates: HTMLElement[] = [];
 
-	if (root.matches && root.matches(`.internal-embed:not([${PROCESSED_ATTR}])`)) {
+	if (root.matches && root.matches(".internal-embed")) {
 		candidates.push(root);
 	}
 
-	const children = root.querySelectorAll<HTMLElement>(
-		`.internal-embed:not([${PROCESSED_ATTR}])`
-	);
+	const children = root.querySelectorAll<HTMLElement>(".internal-embed");
 	for (let i = 0; i < children.length; i++) {
 		const child = children[i];
 		if (child) candidates.push(child);
 	}
 
 	for (const embed of candidates) {
-		const src = embed.getAttribute("src");
-		if (!src) continue;
-
-		const linkpath = extractLinkpath(src);
-		const ext = linkpath.split(".").pop()?.toLowerCase();
-		if (!ext) continue;
-
-		const renderer = registry.getByExtension(ext);
-		if (!renderer || !renderer.renderEmbed) continue;
-
-		const resolvedSourcePath = sourcePath
-			?? embed.getAttribute(SOURCE_PATH_ATTR)
-			?? getActiveMarkdownSourcePath(app);
-		if (resolvedSourcePath) {
-			embed.setAttribute(SOURCE_PATH_ATTR, resolvedSourcePath);
-		}
-
-		embed.setAttribute(PROCESSED_ATTR, "");
-		attachToggle(
-			embed,
-			linkpath,
-			resolvedSourcePath,
-			app,
-			renderer.renderEmbed.bind(renderer)
-		);
+		ensureEmbedToggle(embed, app, registry, sourcePath);
 	}
+}
+
+/**
+ * Ensures a single render toggle is present on a renderable embed.
+ *
+ * Idempotent and safe to call repeatedly: it is a no-op when the toggle is
+ * already a child of the embed. The presence of the button (not a marker
+ * attribute) is the guard, so a toggle removed when Obsidian replaces the
+ * embed's children is re-added on the next call rather than skipped forever.
+ */
+function ensureEmbedToggle(
+	embed: HTMLElement,
+	app: App,
+	registry: FormatRegistry,
+	sourcePath?: string
+): void {
+	const src = embed.getAttribute("src");
+	if (!src) return;
+
+	const linkpath = extractLinkpath(src);
+	const ext = linkpath.split(".").pop()?.toLowerCase();
+	if (!ext) return;
+
+	const renderer = registry.getByExtension(ext);
+	if (!renderer || !renderer.renderEmbed) return;
+
+	const resolvedSourcePath = sourcePath
+		?? embed.getAttribute(SOURCE_PATH_ATTR)
+		?? getActiveMarkdownSourcePath(app);
+	if (resolvedSourcePath) {
+		embed.setAttribute(SOURCE_PATH_ATTR, resolvedSourcePath);
+	}
+
+	// Already toggled: a button is present as a direct child. Nothing to do.
+	if (embed.querySelector(`:scope > .${TOGGLE_CLASS}`)) return;
+
+	embed.setAttribute(PROCESSED_ATTR, "");
+	attachToggle(
+		embed,
+		linkpath,
+		resolvedSourcePath,
+		app,
+		renderer.renderEmbed.bind(renderer)
+	);
 }
 
 function attachToggle(
@@ -104,7 +134,7 @@ function attachToggle(
 	renderEmbed: (content: string, container: HTMLElement) => void
 ): void {
 	const btn = embed.createEl("button", {
-		cls: "polyglot-embed-toggle",
+		cls: TOGGLE_CLASS,
 		attr: { "aria-label": "Render inline" },
 	});
 	setIcon(btn, "eye");

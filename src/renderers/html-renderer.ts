@@ -29,7 +29,7 @@ export const htmlRenderer: FormatRenderer = {
 		} else {
 			iframe = container.createEl("iframe", { cls: "polyglot-html-file-iframe" });
 			iframe.setAttribute(IFRAME_ATTR, "");
-			iframe.setAttribute("sandbox", "allow-same-origin allow-scripts");
+			iframe.setAttribute("sandbox", "allow-scripts");
 			iframe.setAttribute("referrerpolicy", "no-referrer");
 			iframe.srcdoc = buildSandboxDocument(content);
 		}
@@ -48,46 +48,55 @@ export function createSandboxedIframe(
 		cls: "polyglot-html-sandbox",
 	});
 
-	iframe.setAttribute("sandbox", "allow-same-origin allow-scripts");
+	iframe.setAttribute("sandbox", "allow-scripts");
 	iframe.setAttribute("referrerpolicy", "no-referrer");
 	iframe.setAttribute("scrolling", "no");
 	iframe.srcdoc = buildSandboxDocument(source);
 
-	let resizeObserver: ResizeObserver | null = null;
+	attachResizeListener(iframe, container);
 
-	iframe.addEventListener(
-		"load",
-		() => {
-			const doc = iframe.contentDocument;
-			if (!doc) {
-				return;
-			}
+	return iframe;
+}
 
-			resizeIframe(iframe);
+/**
+ * Auto-resizes a sandboxed iframe from height reports the frame posts about
+ * itself. The frame runs in an opaque origin (no allow-same-origin), so its
+ * contentDocument cannot be read from here; instead buildSandboxDocument
+ * injects a script that measures its own height and posts
+ * { type: "polyglot-resize", height } to the parent.
+ *
+ * Messages are matched by frame identity (e.source === iframe.contentWindow),
+ * which stays readable cross-origin even though contentDocument does not.
+ * The listener is torn down once the iframe leaves the DOM, reusing a cleanup
+ * MutationObserver on the container.
+ */
+function attachResizeListener(
+	iframe: HTMLIFrameElement,
+	container: HTMLElement
+): void {
+	const onMessage = (e: MessageEvent) => {
+		if (e.source !== iframe.contentWindow) {
+			return;
+		}
+		if (e.data?.type !== "polyglot-resize") {
+			return;
+		}
+		const height = Number(e.data.height);
+		if (Number.isFinite(height) && height > 0) {
+			iframe.style.height = height + "px";
+		}
+	};
 
-			if (typeof ResizeObserver !== "undefined") {
-				resizeObserver = new ResizeObserver(() => resizeIframe(iframe));
-				resizeObserver.observe(doc.documentElement);
-			}
-
-			for (const image of Array.from(doc.images)) {
-				image.addEventListener("load", () => resizeIframe(iframe));
-				image.addEventListener("error", () => resizeIframe(iframe));
-			}
-		},
-		{ once: true }
-	);
+	window.addEventListener("message", onMessage);
 
 	const cleanupObserver = new MutationObserver(() => {
 		if (!iframe.isConnected) {
-			resizeObserver?.disconnect();
+			window.removeEventListener("message", onMessage);
 			cleanupObserver.disconnect();
 		}
 	});
 
 	cleanupObserver.observe(container, { childList: true, subtree: true });
-
-	return iframe;
 }
 
 export function buildSandboxDocument(source: string): string {
@@ -111,6 +120,13 @@ export function buildSandboxDocument(source: string): string {
 	pre {
 		white-space: pre-wrap;
 	}
+	::highlight(polyglot-find) {
+		background-color: rgba(255, 214, 0, 0.4);
+	}
+	::highlight(polyglot-find-current) {
+		background-color: #ff9632;
+		color: #000;
+	}
 </style>
 <script>
 document.addEventListener('click', function(e) {
@@ -121,33 +137,217 @@ document.addEventListener('click', function(e) {
 	e.preventDefault();
 	e.stopPropagation();
 	if (href.charAt(0) === '#') {
-		// Hash link — scroll to the target element manually
+		// Hash link: scroll to the target element manually
 		// (default navigation breaks in srcdoc iframes on Electron)
 		var target = document.querySelector(href);
 		if (target) target.scrollIntoView({behavior: 'smooth'});
 	} else {
-		// External link — ask parent to open in system browser
+		// External link: ask parent to open in system browser
 		window.parent.postMessage({type: 'polyglot-open-url', url: href}, '*');
 	}
 });
+
+// Self-measure and report height to the parent. The frame is sandboxed
+// without allow-same-origin, so the parent cannot read this document; it
+// resizes the iframe from these messages instead.
+(function() {
+	function reportHeight() {
+		var de = document.documentElement;
+		var body = document.body;
+		var height = Math.max(
+			de ? de.scrollHeight : 0,
+			body ? body.scrollHeight : 0,
+			de ? de.offsetHeight : 0,
+			body ? body.offsetHeight : 0
+		);
+		window.parent.postMessage({type: 'polyglot-resize', height: height}, '*');
+	}
+	document.addEventListener('DOMContentLoaded', reportHeight);
+	window.addEventListener('load', reportHeight);
+	if (typeof ResizeObserver !== 'undefined') {
+		new ResizeObserver(reportHeight).observe(document.documentElement);
+	}
+	// Images change layout once they finish loading; capture so we see
+	// load/error for every <img> without per-element listeners.
+	document.addEventListener('load', function(e) {
+		if (e.target && e.target.tagName === 'IMG') reportHeight();
+	}, true);
+	document.addEventListener('error', function(e) {
+		if (e.target && e.target.tagName === 'IMG') reportHeight();
+	}, true);
+})();
+
+// Scroll persistence. The frame is opaque to the parent, so the parent cannot
+// read or set this frame's scroll. Instead the frame reports its own scroll
+// position (throttled) and, when the parent asks, restores to a target itself.
+(function() {
+	var restoring = false;
+
+	var scrollRaf = 0;
+	function report() {
+		scrollRaf = 0;
+		if (restoring) return;
+		window.parent.postMessage({type: 'polyglot-scroll', y: window.scrollY}, '*');
+	}
+	window.addEventListener('scroll', function() {
+		if (!scrollRaf) scrollRaf = requestAnimationFrame(report);
+	}, true);
+
+	function restoreScroll(y) {
+		restoring = true;
+		var rafId = 0;
+		var deadline = Date.now() + 1500;
+		function cleanup() {
+			cancelAnimationFrame(rafId);
+			window.removeEventListener('wheel', onInput, true);
+			window.removeEventListener('keydown', onInput, true);
+			window.removeEventListener('mousedown', onInput, true);
+			window.removeEventListener('touchstart', onInput, true);
+			restoring = false;
+		}
+		// Yield the instant the user interacts so the restore can never trap
+		// the view at a position the user is trying to leave.
+		function onInput() { cleanup(); }
+		function tick() {
+			window.scrollTo(0, y);
+			// The document may still be growing (images decoding) so the target
+			// isn't always reachable on the first try; retry for a short window.
+			if (Math.abs(window.scrollY - y) <= 1 || Date.now() > deadline) { cleanup(); return; }
+			rafId = requestAnimationFrame(tick);
+		}
+		window.addEventListener('wheel', onInput, true);
+		window.addEventListener('keydown', onInput, true);
+		window.addEventListener('mousedown', onInput, true);
+		window.addEventListener('touchstart', onInput, true);
+		tick();
+	}
+
+	window.addEventListener('message', function(e) {
+		if (e.source !== window.parent) return;
+		if (e.data && e.data.type === 'polyglot-restore-scroll' && typeof e.data.y === 'number') {
+			restoreScroll(e.data.y);
+		}
+	});
+})();
+
+// Forward app keyboard shortcuts to the host. Keyboard events do not cross the
+// frame boundary, so while focus is inside this frame the app's hotkeys (e.g.
+// Ctrl+Tab to switch tabs) would otherwise be swallowed. Only modifier combos
+// are forwarded (plain typing is left to the frame), and only trusted events,
+// so page scripts cannot synthesize shortcuts.
+window.addEventListener('keydown', function(e) {
+	if (!e.isTrusted) return;
+	if (!(e.ctrlKey || e.metaKey || e.altKey)) return;
+	window.parent.postMessage({
+		type: 'polyglot-key',
+		key: e.key,
+		code: e.code,
+		keyCode: e.keyCode,
+		ctrlKey: e.ctrlKey,
+		metaKey: e.metaKey,
+		altKey: e.altKey,
+		shiftKey: e.shiftKey
+	}, '*');
+}, true);
+
+// Find within the frame. The parent can't read this opaque document, so it
+// sends a query and the frame searches its own DOM, highlights matches with the
+// CSS Custom Highlight API (no DOM mutation), scrolls to the current match, and
+// reports the counts back.
+(function() {
+	var ranges = [];
+	var current = -1;
+
+	function clear() {
+		ranges = [];
+		current = -1;
+		if (window.CSS && CSS.highlights) {
+			CSS.highlights.delete('polyglot-find');
+			CSS.highlights.delete('polyglot-find-current');
+		}
+	}
+
+	function paint() {
+		if (!(window.CSS && CSS.highlights && window.Highlight)) return;
+		var all = new Highlight();
+		for (var i = 0; i < ranges.length; i++) all.add(ranges[i]);
+		CSS.highlights.set('polyglot-find', all);
+		var cur = new Highlight();
+		if (current >= 0 && current < ranges.length) cur.add(ranges[current]);
+		CSS.highlights.set('polyglot-find-current', cur);
+	}
+
+	function scrollToCurrent() {
+		if (current < 0) return;
+		var rect = ranges[current].getBoundingClientRect();
+		var target = window.scrollY + rect.top - (window.innerHeight / 2);
+		window.scrollTo(0, target < 0 ? 0 : target);
+	}
+
+	function report() {
+		window.parent.postMessage({
+			type: 'polyglot-find-result',
+			matches: ranges.length,
+			current: ranges.length ? current + 1 : 0
+		}, '*');
+	}
+
+	// Only match text the user can actually see. The DOM also contains
+	// invisible text — inline <script>/<style> source and collapsed
+	// (display:none) sections — which would inflate the match count and
+	// make the current-match scroll jump to nothing.
+	function isSearchable(node) {
+		var el = node.parentElement;
+		if (!el) return false;
+		if (el.closest('script, style, noscript, title')) return false;
+		if (el.checkVisibility && !el.checkVisibility()) return false;
+		return true;
+	}
+
+	function find(query) {
+		clear();
+		if (query) {
+			var q = query.toLowerCase();
+			var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
+			var node;
+			while ((node = walker.nextNode())) {
+				if (!isSearchable(node)) continue;
+				var hay = node.nodeValue.toLowerCase();
+				var from = 0, idx;
+				while ((idx = hay.indexOf(q, from)) !== -1) {
+					var range = document.createRange();
+					range.setStart(node, idx);
+					range.setEnd(node, idx + q.length);
+					ranges.push(range);
+					from = idx + q.length;
+				}
+			}
+			current = ranges.length ? 0 : -1;
+		}
+		paint();
+		scrollToCurrent();
+		report();
+	}
+
+	function step(dir) {
+		if (!ranges.length) { report(); return; }
+		current = (current + dir + ranges.length) % ranges.length;
+		paint();
+		scrollToCurrent();
+		report();
+	}
+
+	window.addEventListener('message', function(e) {
+		if (e.source !== window.parent) return;
+		var d = e.data;
+		if (!d) return;
+		if (d.type === 'polyglot-find') find(String(d.query || ''));
+		else if (d.type === 'polyglot-find-step') step(d.dir === -1 ? -1 : 1);
+		else if (d.type === 'polyglot-find-clear') clear();
+	});
+})();
 </script>
 </head>
 <body>${source}</body>
 </html>`;
-}
-
-function resizeIframe(iframe: HTMLIFrameElement): void {
-	const doc = iframe.contentDocument;
-	if (!doc) {
-		return;
-	}
-
-	const height = Math.max(
-		doc.documentElement.scrollHeight,
-		doc.body?.scrollHeight ?? 0,
-		doc.documentElement.offsetHeight,
-		doc.body?.offsetHeight ?? 0
-	);
-
-	iframe.style.height = height + "px";
 }

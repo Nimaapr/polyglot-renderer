@@ -16,6 +16,48 @@
 	display: block;
 }
 
+/* Find bar overlay in the HTML file view */
+.polyglot-file-view {
+	position: relative;
+}
+.polyglot-find-bar {
+	position: absolute;
+	top: 8px;
+	right: 8px;
+	z-index: 20;
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	padding: 4px 6px;
+	background: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 6px;
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+.polyglot-find-input {
+	width: 180px;
+}
+.polyglot-find-count {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	min-width: 56px;
+	text-align: center;
+}
+.polyglot-find-btn {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	cursor: pointer;
+	padding: 4px;
+	background: transparent;
+	border: none;
+	box-shadow: none;
+	color: var(--text-muted);
+}
+.polyglot-find-btn:hover {
+	color: var(--text-normal);
+}
+
 /* Embed toggle wrapper */
 .internal-embed[data-polyglot-embed] {
 	position: relative;

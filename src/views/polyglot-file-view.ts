@@ -1,4 +1,4 @@
-import { FileView, TFile, ViewStateResult, WorkspaceLeaf } from "obsidian";
+import { FileView, TFile, ViewStateResult, WorkspaceLeaf, setIcon } from "obsidian";
 import type { FormatRenderer } from "registry/format-renderer";
 import { inlineAssets } from "asset-inliner";
 
@@ -8,6 +8,9 @@ export class PolyglotFileView extends FileView {
 	private hasRegisteredVaultEvents = false;
 	private lastScroll = 0;
 	private pendingScroll: number | null = null;
+	private findBar: HTMLElement | null = null;
+	private findInput: HTMLInputElement | null = null;
+	private findCount: HTMLElement | null = null;
 
 	constructor(leaf: WorkspaceLeaf, renderer: FormatRenderer, viewType: string) {
 		super(leaf);
@@ -68,11 +71,13 @@ export class PolyglotFileView extends FileView {
 	}
 
 	async onUnloadFile(file: TFile): Promise<void> {
+		this.closeFind();
 		this.contentEl.empty();
 		await super.onUnloadFile(file);
 	}
 
 	protected onClose(): Promise<void> {
+		this.closeFind();
 		this.contentEl.empty();
 		return Promise.resolve();
 	}
@@ -123,23 +128,33 @@ export class PolyglotFileView extends FileView {
 		this.renderer.renderFile(content, this.contentEl);
 		const iframe = this.getIframe();
 		if (iframe) {
-			// Once the fresh frame has loaded its script, ask it to restore.
-			iframe.addEventListener("load", () => this.flushPendingScroll(), { once: true });
+			iframe.addEventListener("load", () => {
+				// Once the fresh frame has loaded its script, ask it to restore.
+				this.flushPendingScroll();
+				// Re-run an active find against the freshly loaded frame.
+				if (this.findInput?.value) this.sendFind(this.findInput.value);
+			}, { once: true });
 		}
 	}
 
-	/** Cache the scroll position the frame reports, while the view is visible. */
+	/** Handle messages the frame posts back (it is opaque, so this is our only channel). */
 	private onFrameMessage = (e: MessageEvent): void => {
 		const iframe = this.getIframe();
 		if (!iframe || e.source !== iframe.contentWindow) return;
-		const data = e.data as { type?: string; y?: unknown } | null;
-		if (data?.type === "polyglot-scroll" && typeof data.y === "number") {
+		const data = e.data as { type?: string; y?: unknown; matches?: unknown; current?: unknown } | null;
+		if (!data) return;
+
+		if (data.type === "polyglot-scroll" && typeof data.y === "number") {
 			// The frame suppresses reports during its own restore, and we ignore
 			// reports while hidden (the iframe collapses to scroll 0 then), so
 			// this is the user's real position.
 			if (this.contentEl.clientHeight > 0) {
 				this.lastScroll = data.y;
 			}
+		} else if (data.type === "polyglot-find-result" && this.findCount) {
+			const matches = typeof data.matches === "number" ? data.matches : 0;
+			const current = typeof data.current === "number" ? data.current : 0;
+			this.findCount.setText(matches ? `${current}/${matches}` : "No results");
 		}
 	};
 
@@ -168,8 +183,78 @@ export class PolyglotFileView extends FileView {
 	}
 
 	private requestRestore(y: number): void {
-		// postMessage is one of the few APIs allowed cross-origin.
-		this.getIframe()?.contentWindow?.postMessage({ type: "polyglot-restore-scroll", y }, "*");
+		this.postToFrame({ type: "polyglot-restore-scroll", y });
+	}
+
+	// --- Find in document -----------------------------------------------------
+	// Obsidian's search can't reach into the opaque sandboxed iframe, so the find
+	// bar sends a query over postMessage and the frame searches its own DOM
+	// (highlighting via the CSS Custom Highlight API) and scrolls to matches.
+
+	/** Open (or focus) the find bar. Invoked from the plugin's Ctrl/Cmd+F handler. */
+	openFind(): void {
+		if (!this.findBar || !this.findBar.isConnected) this.createFindBar();
+		this.findInput?.focus();
+		this.findInput?.select();
+		if (this.findInput?.value) this.sendFind(this.findInput.value);
+	}
+
+	private closeFind(): void {
+		this.clearFind();
+		this.findBar?.remove();
+		this.findBar = null;
+		this.findInput = null;
+		this.findCount = null;
+	}
+
+	private createFindBar(): void {
+		const bar = this.contentEl.createDiv({ cls: "polyglot-find-bar" });
+		const input = bar.createEl("input", {
+			cls: "polyglot-find-input",
+			attr: { type: "text", placeholder: "Find in document", "aria-label": "Find in document" },
+		});
+		const count = bar.createSpan({ cls: "polyglot-find-count" });
+		const prev = bar.createEl("button", { cls: "polyglot-find-btn", attr: { "aria-label": "Previous match" } });
+		const next = bar.createEl("button", { cls: "polyglot-find-btn", attr: { "aria-label": "Next match" } });
+		const close = bar.createEl("button", { cls: "polyglot-find-btn", attr: { "aria-label": "Close" } });
+		setIcon(prev, "arrow-up");
+		setIcon(next, "arrow-down");
+		setIcon(close, "x");
+
+		input.addEventListener("input", () => this.sendFind(input.value));
+		input.addEventListener("keydown", (e) => {
+			if (e.key === "Enter") {
+				e.preventDefault();
+				this.stepFind(e.shiftKey ? -1 : 1);
+			} else if (e.key === "Escape") {
+				e.preventDefault();
+				this.closeFind();
+			}
+		});
+		prev.addEventListener("click", () => { this.stepFind(-1); input.focus(); });
+		next.addEventListener("click", () => { this.stepFind(1); input.focus(); });
+		close.addEventListener("click", () => this.closeFind());
+
+		this.findBar = bar;
+		this.findInput = input;
+		this.findCount = count;
+	}
+
+	private sendFind(query: string): void {
+		this.postToFrame({ type: "polyglot-find", query });
+	}
+
+	private stepFind(dir: number): void {
+		this.postToFrame({ type: "polyglot-find-step", dir });
+	}
+
+	private clearFind(): void {
+		this.postToFrame({ type: "polyglot-find-clear" });
+	}
+
+	/** postMessage is one of the few APIs allowed cross-origin. */
+	private postToFrame(message: unknown): void {
+		this.getIframe()?.contentWindow?.postMessage(message, "*");
 	}
 
 	private getIframe(): HTMLIFrameElement | null {

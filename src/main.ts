@@ -106,6 +106,22 @@ export default class PolyglotRendererPlugin extends Plugin {
 		window.addEventListener("message", onMessage);
 		this.register(() => window.removeEventListener("message", onMessage));
 
+		// Ctrl/Cmd+F opens the find bar when an HTML file view is active. This
+		// also catches the synthetic Ctrl+F re-dispatched above when focus is
+		// inside the iframe.
+		const onFindKey = (e: KeyboardEvent) => {
+			if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === "f" || e.key === "F")) {
+				const view = this.app.workspace.getActiveViewOfType(PolyglotFileView);
+				if (view) {
+					e.preventDefault();
+					e.stopPropagation();
+					view.openFind();
+				}
+			}
+		};
+		window.addEventListener("keydown", onFindKey, { capture: true });
+		this.register(() => window.removeEventListener("keydown", onFindKey, { capture: true }));
+
 	}
 
 	onunload() {
